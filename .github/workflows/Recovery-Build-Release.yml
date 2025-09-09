@@ -1,59 +1,60 @@
-name: Recovery Build Release - X657B
+name: Recovery-Build-Release
 
 on:
   workflow_dispatch:
+    inputs:
+      oem:
+        description: "OEM (e.g. infinix)"
+        required: true
+      codename:
+        description: "Device codename (e.g. x657b)"
+        required: true
+      device:
+        description: "Device name (e.g. Infinix Smart 5)"
+        required: true
 
 jobs:
   build:
     runs-on: ubuntu-20.04
-    permissions:
-      contents: write   # penting biar bisa buat release
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Install dependencies
-      run: |
-        sudo apt update && sudo apt install -y git-core gnupg flex bison build-essential \
-          zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 \
-          libncurses5-dev x11proto-core-dev libx11-dev libgl1-mesa-dev \
-          libxml2-utils xsltproc unzip fontconfig openjdk-11-jdk
+      - name: Set environment variables
+        run: |
+          echo "OEM=${{ github.event.inputs.oem }}" >> $GITHUB_ENV
+          echo "CODENAME=${{ github.event.inputs.codename }}" >> $GITHUB_ENV
+          echo "DEVICE=${{ github.event.inputs.device }}" >> $GITHUB_ENV
 
-    - name: Install repo
-      run: |
-        mkdir ~/bin
-        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-        chmod a+x ~/bin/repo
-        echo "PATH=~/bin:$PATH" >> $GITHUB_ENV
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-core gnupg flex bison build-essential \
+            zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 \
+            lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z-dev \
+            libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig
 
-    - name: Init TWRP manifest
-      run: |
-        repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni -b twrp-12.1
-        repo sync -j$(nproc --all)
+      - name: Sync TWRP source
+        run: |
+          mkdir workspace && cd workspace
+          repo init -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git -b twrp-12.1
+          repo sync -c --no-tags --no-clone-bundle --force-sync -j$(nproc --all)
 
-    - name: Clone Device Tree
-      run: |
-        git clone https://github.com/suryonododi1/INFINIX_SMART5_twrp_x657b -b main device/infinix/x657b
+      - name: Clone device tree
+        run: |
+          cd workspace
+          git clone https://github.com/${{ github.repository_owner }}/device_${{ env.OEM }}_${{ env.CODENAME }} device/${{ env.OEM }}/${{ env.CODENAME }}
 
-    - name: Build Recovery
-      run: |
-        source build/envsetup.sh
-        export ALLOW_MISSING_DEPENDENCIES=true
-        lunch twrp_x657b-eng
-        mka recoveryimage -j$(nproc --all)
+      - name: Build TWRP
+        run: |
+          cd workspace
+          source build/envsetup.sh
+          lunch omni_${{ env.CODENAME }}-eng
+          mka recoveryimage -j$(nproc --all)
 
-    - name: Upload to Release
-      uses: softprops/action-gh-release@v2
-      with:
-        files: |
-          out/target/product/x657b/recovery.img
-        name: TWRP-X657B-${{ github.run_id }}
-        tag_name: build-${{ github.run_id }}
-        body: |
-          ✅ Auto-built TWRP for Infinix Smart 5 (X657B)
-          📅 Build ID: ${{ github.run_id }}
-          🔗 Manifest: twrp-12.1
-          🚀 Enjoy flashing!
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOexport
+      - name: Upload recovery image
+        uses: actions/upload-artifact@v3
+        with:
+          name: TWRP-${{ env.DEVICE }}
+          path: workspace/out/target/product/${{ env.CODENAME }}/recovery.img

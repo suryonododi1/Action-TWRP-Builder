@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 env:
-  MANIFEST: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni
+  MANIFEST: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp
   BRANCH: twrp-12.1
   DEVICE: x657b
   TREE: https://github.com/suryonododi1/INFINIX_SMART5_twrp_x657b
@@ -12,94 +12,47 @@ env:
 
 jobs:
   build:
-    if: github.event.repository.owner.id == github.event.sender.id
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
+    runs-on: ubuntu-20.04
     steps:
-    - name: Display Run Parameters
-      run: |
-        echo "::group::User Environment Variables"
-        echo "Manifest: $MANIFEST"
-        echo "Branch: $BRANCH"
-        echo "Device: $DEVICE"
-        echo "Tree: $TREE"
-        echo "Tree Branch: $TREE_BRANCH"
-        echo "::endgroup::"
-
-    - name: Check Out
+    - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Cleanup
-      uses: rokibhasansagar/slimhub_actions@main
-
-    - name: Prepare the environment
+    - name: Install dependencies
       run: |
-        sudo apt update && sudo apt upgrade -y
-        DEBIAN_FRONTEND=noninteractive sudo apt install -yq \
-            linux-modules-extra-$(uname -r) \
-            gperf gcc-multilib gcc-10-multilib g++-multilib g++-10-multilib \
-            libc6-dev lib32ncurses-dev x11proto-core-dev libx11-dev tree lib32z-dev libgl1-mesa-dev libxml2-utils \
-            xsltproc bc ccache lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev libsdl1.2-dev \
-            build-essential libgtk-3-dev libglu1-mesa-dev freeglut3-dev git libxml2 lzop pngcrush schedtool squashfs-tools \
-            imagemagick libbz2-dev lzma ncftp qemu-user-static libstdc++-10-dev libncurses6 python3 tar
+        sudo apt update && sudo apt install -y git-core gnupg flex bison \
+        gperf build-essential zip curl zlib1g-dev gcc-multilib g++-multilib \
+        libc6-dev-i386 lib32ncurses5-dev x11proto-core-dev libx11-dev \
+        lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig \
+        python3 bc repo ccache liblz4-tool libncurses5 libncurses5-dev \
+        libtinfo5 libncurses-dev imagemagick
 
-    - name: Install OpenJDK
+    - name: Install Java
       uses: actions/setup-java@v4
       with:
         distribution: 'zulu'
         java-version: '11'
 
-    - name: Install repo
+    - name: Init repo
       run: |
-        mkdir ~/bin
-        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-        chmod a+x ~/bin/repo
-        sudo ln -sf ~/bin/repo /usr/bin/repo
-
-    - name: Initialize repo
-      run: |
-        mkdir workspace
-        cd workspace
-        echo "workspace-folder=$(pwd)" >> $GITHUB_OUTPUT
-        git config --global user.name "Nico170420"
-        git config --global user.email "b170420nc@gmail.com"
-        repo init --depth=1 -u $MANIFEST -b $BRANCH
-      id: pwd
-
-    - name: Repo Sync
-      run: |
+        mkdir workspace && cd workspace
+        repo init -u $MANIFEST -b $BRANCH --depth=1
         repo sync -j$(nproc --all) --force-sync
-      working-directory: workspace
 
     - name: Clone device tree
       run: |
-        git clone $TREE -b $TREE_BRANCH ./device/infinix/$DEVICE
-      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+        cd workspace
+        git clone $TREE -b $TREE_BRANCH device/infinix/$DEVICE
 
-    - name: Set Swap Space
-      uses: pierotofy/set-swap-space@master
-      with:
-        swap-size-gb: 12
-
-    - name: Building recovery
+    - name: Build TWRP
       run: |
+        cd workspace
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
-        lunch twrp_${DEVICE}-eng && make clean && make recoveryimage -j$(nproc --all)
-      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+        lunch twrp_${DEVICE}-eng
+        make recoveryimage -j$(nproc --all)
 
-    - name: Upload to Release
-      uses: softprops/action-gh-release@v2
+    - name: Upload build
+      uses: actions/upload-artifact@v4
       with:
-        files: |
-          workspace/out/target/product/${{ env.DEVICE }}/recovery.img
-          workspace/out/target/product/${{ env.DEVICE }}/*.zip
-        name: ${{ env.DEVICE }}-${{ github.run_id }}
-        tag_name: ${{ github.run_id }}
-        body: |
-          Manifest: ${{ env.BRANCH }}
-          Device: ${{ env.DEVICE }}
-          Target: recovery.img
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        name: twrp-x657b
+        path: workspace/out/target/product/${{ env.DEVICE }}/recovery.img
